@@ -230,6 +230,8 @@ app.get('/', (req, res) => {
 
 // Webhook endpoint - receives link notifications from website
 app.post('/webhook/link', async (req, res) => {
+  console.log('Webhook endpoint hit...')
+  
   try {
     const { discord_id } = req.body;
 
