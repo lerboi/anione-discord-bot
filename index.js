@@ -314,7 +314,7 @@ app.post('/webhook/link', async (req, res) => {
 });
 
 // Start Express server FIRST
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT;
 const HOST = '0.0.0.0';
 
 const server = app.listen(PORT, HOST, () => {
