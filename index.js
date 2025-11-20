@@ -314,13 +314,10 @@ app.post('/webhook/link', async (req, res) => {
 });
 
 // Start Express server FIRST
-const PORT = process.env.PORT;
-const HOST = '0.0.0.0';
+const PORT = 8080; // Fallback to 3000 if undefined
 
-const server = app.listen(PORT, HOST, () => {
-  console.log(`🎣 Webhook server running on ${HOST}:${PORT}`);
-  console.log(`🌐 Health check: http://${HOST}:${PORT}/`);
-  console.log(`🔗 Webhook endpoint: http://${HOST}:${PORT}/webhook/link`);
+const server = app.listen(PORT, () => {
+  console.log(`🎣 Webhook server running on ${PORT}`);
 });
 
 // Handle server errors
