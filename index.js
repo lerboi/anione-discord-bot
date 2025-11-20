@@ -221,27 +221,47 @@ async function assignRolesByDiscordId(member) {
 }
 
 const app = express();
+
+// Middleware
 app.use(express.json());
 
 // Health check endpoint
 app.get('/', (req, res) => {
-  res.json({ status: 'Bot is running', uptime: process.uptime() });
+  console.log('📍 Health check accessed');
+  res.json({ 
+    status: 'Bot is running', 
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  });
 });
 
-// Webhook endpoint - receives link notifications from website
+// Webhook endpoint
 app.post('/webhook/link', async (req, res) => {
-  console.log('Webhook endpoint hit...')
+  console.log('📥 Webhook endpoint hit!');
+  console.log('📥 Request body:', req.body);
   
   try {
     const { discord_id } = req.body;
 
     if (!discord_id) {
+      console.log('❌ No discord_id provided');
       return res.status(400).json({ error: 'discord_id is required' });
     }
 
     console.log(`🔗 Received link notification for Discord ID: ${discord_id}`);
 
-    // Get the guild (server)
+    // Wait for bot to be ready
+    if (!client.isReady()) {
+      console.log('⚠️ Bot not ready yet, waiting...');
+      await new Promise(resolve => {
+        if (client.isReady()) {
+          resolve();
+        } else {
+          client.once('ready', resolve);
+        }
+      });
+    }
+
     const guild = client.guilds.cache.get(process.env.DISCORD_GUILD_ID);
     
     if (!guild) {
@@ -249,21 +269,26 @@ app.post('/webhook/link', async (req, res) => {
       return res.status(404).json({ error: 'Guild not found' });
     }
 
-    // Fetch the member
-    const member = await guild.members.fetch(discord_id).catch(() => null);
+    console.log(`✅ Found guild: ${guild.name}`);
+
+    const member = await guild.members.fetch(discord_id).catch(err => {
+      console.log('❌ Error fetching member:', err.message);
+      return null;
+    });
     
     if (!member) {
       console.log('⚠️ Member not found in server');
       return res.status(404).json({ error: 'Member not found in server' });
     }
 
-    // Check user status and assign roles
+    console.log(`✅ Found member: ${member.user.tag}`);
+
     const status = await checkUserStatus(discord_id);
+    console.log(`📊 User status: ${status}`);
     
     if (status !== 'not_found') {
       await assignRoles(member, status);
       
-      // Send DM to user
       try {
         const roleType = status === 'paid' ? '👑 Paid Member' : '🆓 Free Member';
         await member.send(
@@ -271,25 +296,38 @@ app.post('/webhook/link', async (req, res) => {
           `You've been verified as a **${roleType}**.\n` +
           `Your roles have been automatically assigned. Enjoy your perks!`
         );
+        console.log(`📨 DM sent to ${member.user.tag}`);
       } catch (dmError) {
-        console.log(`Could not send DM to ${member.user.tag}`);
+        console.log(`⚠️ Could not send DM to ${member.user.tag}`);
       }
 
       console.log(`✅ Roles assigned to ${member.user.tag} (${status})`);
-      return res.json({ success: true, status });
+      return res.json({ success: true, status, user: member.user.tag });
     } else {
       console.log('⚠️ User not found in database');
       return res.status(404).json({ error: 'User not found in database' });
     }
   } catch (error) {
     console.error('❌ Error in webhook:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ error: 'Internal server error', message: error.message });
   }
 });
 
+// Start Express server FIRST
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🎣 Webhook server running on port ${PORT}`);
+const HOST = '0.0.0.0';
+
+const server = app.listen(PORT, HOST, () => {
+  console.log(`🎣 Webhook server running on ${HOST}:${PORT}`);
+  console.log(`🌐 Health check: http://${HOST}:${PORT}/`);
+  console.log(`🔗 Webhook endpoint: http://${HOST}:${PORT}/webhook/link`);
 });
 
+// Handle server errors
+server.on('error', (error) => {
+  console.error('❌ Server error:', error);
+});
+
+// Then login bot AFTER server starts
+console.log('🤖 Logging in Discord bot...');
 client.login(process.env.DISCORD_BOT_TOKEN);
