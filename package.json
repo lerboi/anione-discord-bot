@@ -1,0 +1,19 @@
+{
+  "name": "anione-discord-bot",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lerboi/anione-discord-bot.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/lerboi/anione-discord-bot/issues"
+  },
+  "homepage": "https://github.com/lerboi/anione-discord-bot#readme",
+  "description": ""
+}
