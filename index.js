@@ -1,6 +1,8 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, REST, Routes, MessageFlags } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, MessageFlags, PermissionFlagsBits } = require('discord.js');
 const { fetch } = require('undici');
+const fs = require('fs');
+const path = require('path');
 
 const express = require('express');
 
@@ -8,6 +10,7 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.DirectMessages,
   ],
 });
 
@@ -25,6 +28,11 @@ const commands = [
   {
     name: 'verify',
     description: 'Manually verify your account status and update roles',
+  },
+  {
+    name: 'start-promo',
+    description: 'Start the promotional DM drip campaign (Admin only)',
+    default_member_permissions: PermissionFlagsBits.Administrator.toString(),
   },
 ];
 
@@ -58,6 +66,8 @@ client.on('interactionCreate', async (interaction) => {
     await handleLinkAccount(interaction);
   } else if (commandName === 'verify') {
     await handleVerify(interaction);
+  } else if (commandName === 'start-promo') {
+    await handleStartPromo(interaction);
   }
 });
 
@@ -218,6 +228,193 @@ async function assignRolesByDiscordId(member) {
       console.log(`Could not send DM to ${member.user.tag}`);
     }
   }
+}
+
+// ============================================
+// DRIP CAMPAIGN SYSTEM
+// ============================================
+
+// Campaign state tracking
+let campaignRunning = false;
+
+// File paths (absolute for Railway persistent volumes)
+const DATA_DIR = '/app/data';
+const MEMBER_IDS_FILE = path.join(DATA_DIR, 'member_ids.txt');
+const SENT_FILE = path.join(DATA_DIR, 'sent.txt');
+
+// Promo message
+const PROMO_MESSAGE = "Hey! Thanks for being part of Anione. Use code 'DISCORD2026' for 5 free Image tokens: https://www.anione.me/en/Profile?tab=redeem&code=DISCORD2026";
+
+// Ensure data directory exists
+function ensureDataDirectory() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    console.log(`📁 Created directory: ${DATA_DIR}`);
+  }
+
+  // Create sent.txt if it doesn't exist
+  if (!fs.existsSync(SENT_FILE)) {
+    fs.writeFileSync(SENT_FILE, '', 'utf8');
+    console.log(`📄 Created file: ${SENT_FILE}`);
+  }
+}
+
+// Read user IDs from file
+function readUserIds(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) {
+      console.error(`❌ File not found: ${filePath}`);
+      return [];
+    }
+
+    const content = fs.readFileSync(filePath, 'utf8');
+    return content
+      .split('\n')
+      .map(id => id.trim())
+      .filter(id => id.length > 0);
+  } catch (error) {
+    console.error(`❌ Error reading file ${filePath}:`, error);
+    return [];
+  }
+}
+
+// Append user ID to sent.txt
+function appendToSent(userId) {
+  try {
+    fs.appendFileSync(SENT_FILE, `${userId}\n`, 'utf8');
+  } catch (error) {
+    console.error(`❌ Error writing to ${SENT_FILE}:`, error);
+  }
+}
+
+// Main drip campaign function
+async function sendDripCampaign(interaction) {
+  console.log('🚀 Starting drip campaign...');
+
+  // Ensure data directory and files exist
+  ensureDataDirectory();
+
+  // Read member IDs and sent IDs
+  const memberIds = readUserIds(MEMBER_IDS_FILE);
+  const sentIds = readUserIds(SENT_FILE);
+
+  console.log(`📊 Total member IDs: ${memberIds.length}`);
+  console.log(`📊 Already sent: ${sentIds.length}`);
+
+  // Filter out already sent IDs
+  const sentSet = new Set(sentIds);
+  const toSend = memberIds.filter(id => !sentSet.has(id));
+
+  console.log(`📊 Remaining to send: ${toSend.length}`);
+
+  if (toSend.length === 0) {
+    console.log('✅ No new users to message');
+    campaignRunning = false;
+    return;
+  }
+
+  // Send DMs with 3-minute intervals
+  let successCount = 0;
+  let closedDMCount = 0;
+  let errorCount = 0;
+
+  for (let i = 0; i < toSend.length; i++) {
+    const userId = toSend[i];
+
+    try {
+      // Fetch user
+      const user = await client.users.fetch(userId);
+
+      // Send DM
+      await user.send(PROMO_MESSAGE);
+
+      console.log(`✅ [${i + 1}/${toSend.length}] Sent to ${user.tag} (${userId})`);
+      successCount++;
+
+      // Log to sent.txt immediately
+      appendToSent(userId);
+
+    } catch (error) {
+      if (error.code === 50007) {
+        // DMs are closed
+        console.log(`🚫 [${i + 1}/${toSend.length}] DMs Closed for user ${userId}`);
+        closedDMCount++;
+
+        // Still log to sent.txt to avoid retry
+        appendToSent(userId);
+      } else {
+        // Other error
+        console.error(`❌ [${i + 1}/${toSend.length}] Error sending to ${userId}:`, error.message);
+        errorCount++;
+
+        // Don't log to sent.txt - might be temporary error
+      }
+    }
+
+    // Wait 3 minutes before next message (except for last one)
+    if (i < toSend.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 180000)); // 3 minutes = 180,000ms
+    }
+  }
+
+  console.log('✅ Drip campaign completed!');
+  console.log(`📊 Success: ${successCount} | DMs Closed: ${closedDMCount} | Errors: ${errorCount}`);
+
+  campaignRunning = false;
+}
+
+// /start-promo command handler
+async function handleStartPromo(interaction) {
+  // Check if campaign is already running
+  if (campaignRunning) {
+    await interaction.reply({
+      content: '⚠️ Campaign already in progress',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  // Ensure data directory exists
+  ensureDataDirectory();
+
+  // Read member IDs
+  const memberIds = readUserIds(MEMBER_IDS_FILE);
+  const sentIds = readUserIds(SENT_FILE);
+
+  if (memberIds.length === 0) {
+    await interaction.reply({
+      content: `❌ No member IDs found in \`${MEMBER_IDS_FILE}\``,
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  // Calculate remaining users
+  const sentSet = new Set(sentIds);
+  const toSend = memberIds.filter(id => !sentSet.has(id));
+
+  if (toSend.length === 0) {
+    await interaction.reply({
+      content: '✅ No new users to message. All users have already been contacted!',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  // Set campaign running flag
+  campaignRunning = true;
+
+  // Reply to user
+  await interaction.reply({
+    content: `✅ Drip campaign started! Processing ${toSend.length} users...`,
+    flags: MessageFlags.Ephemeral,
+  });
+
+  // Start campaign asynchronously (don't await - runs in background)
+  sendDripCampaign(interaction).catch(error => {
+    console.error('❌ Campaign error:', error);
+    campaignRunning = false;
+  });
 }
 
 const app = express();
