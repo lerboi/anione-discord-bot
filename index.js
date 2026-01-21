@@ -215,7 +215,7 @@ async function assignRolesByDiscordId(member) {
 
   if (status !== 'not_found') {
     await assignRoles(member, status);
-    
+
     // Send welcome DM
     try {
       const roleType = status === 'paid' ? '👑 Paid Member' : '🆓 Free Member';
@@ -226,6 +226,21 @@ async function assignRolesByDiscordId(member) {
       );
     } catch (error) {
       console.log(`Could not send DM to ${member.user.tag}`);
+    }
+  }
+
+  // Send promotional message to ALL new members (regardless of account status)
+  try {
+    // Small delay to separate from welcome message if both are sent
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    await member.send(PROMO_MESSAGE);
+    console.log(`✅ Sent promo message to new member: ${member.user.tag}`);
+  } catch (error) {
+    if (error.code === 50007) {
+      console.log(`🚫 DMs Closed for new member: ${member.user.tag}`);
+    } else {
+      console.log(`❌ Could not send promo DM to ${member.user.tag}: ${error.message}`);
     }
   }
 }
